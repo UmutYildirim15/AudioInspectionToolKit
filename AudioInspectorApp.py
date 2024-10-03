@@ -1,6 +1,7 @@
 import os
 import sys
-
+import tempfile
+import xlsxwriter
 import numpy as np
 import pandas as pd
 from PyQt5.QtGui import QPixmap, QIcon
@@ -47,9 +48,34 @@ class AudioInspectorApp(QMainWindow):
         layout = QVBoxLayout()
 
         layout.addWidget(logo)
+
+        self.setStyleSheet("background-color: #aee3e5;")
         self.label = QLabel("Drag and drop audio files here", self)
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
+
+        self.exit_button = QPushButton('Exit', self)
+        self.exit_button.setStyleSheet(""" 
+                                        QPushButton {
+                                            background-color: #e74c3c; /* Kırmızı */
+                                            color: white;
+                                            border: none;
+                                            padding: 10px;
+                                            border-radius: 5px;
+                                            font-size: 14px;
+                                            width: 160px;
+                                            height: 20px;
+                                        }
+                                        QPushButton:hover {
+                                            background-color: #c0392b;
+                                        }
+                                    """)
+        self.exit_button.clicked.connect(self.close)
+
+        exit_button_layout = QHBoxLayout()
+        exit_button_layout.addStretch()
+        exit_button_layout.addWidget(self.exit_button)
+        layout.addLayout(exit_button_layout)
 
         self.file_list = QListWidget(self)
         self.file_list.setSelectionMode(QListWidget.MultiSelection)
@@ -140,7 +166,7 @@ class AudioInspectorApp(QMainWindow):
         self.add_rate_button.clicked.connect(self.add_sampling_rate)
         self.add_rate_button.setStyleSheet(""" 
                                                 QPushButton {
-                                                    background-color: #35d7de;  
+                                                    background-color: #a9b1b2;  
                                                     color: white;
                                                     border: none;
                                                     padding: 10px;
@@ -151,12 +177,11 @@ class AudioInspectorApp(QMainWindow):
                                                 }
                                             """)
 
-        # Remove Button for Sampling Rate
-        self.remove_rate_button = QPushButton("Remove", self)
+        self.remove_rate_button = QPushButton("Remove Sampling Rate", self)
         self.remove_rate_button.clicked.connect(self.remove_sampling_rate)
         self.remove_rate_button.setStyleSheet(""" 
                                                     QPushButton {
-                                                        background-color: #35d7de;  
+                                                        background-color: #a9b1b2;  
                                                         color: white;
                                                         border: none;
                                                         padding: 10px;
@@ -593,7 +618,7 @@ class AudioInspectorApp(QMainWindow):
 
     def add_bit_rate(self):
         new_bit_rate = self.bit_rate_input.text()
-        if new_bit_rate.isdigit() and new_bit_rate not in self.current_bit_rates:  # Bit rate'in sayı olduğundan emin olun
+        if new_bit_rate.isdigit() and new_bit_rate not in self.current_bit_rates:
             self.current_bit_rates.append(new_bit_rate)
             self.update_bit_rate_dropdown()
             self.update_current_formats()
@@ -629,7 +654,7 @@ class AudioInspectorApp(QMainWindow):
         self.clipping_data = []
         all_files_valid = True
 
-        invalid_results = ""  # Sadece INVALID dosyalar için birikmeli sonuçlar
+        invalid_results = ""
 
         for i, file_path in enumerate(selected_files):
             QApplication.processEvents()
@@ -689,13 +714,12 @@ class AudioInspectorApp(QMainWindow):
                 valid_file &= (channel_mode == "stereo" or channel_mode == "mono")
 
             elif analysis_type == "Verify Bit Depth":
-                bit_depth, valid = self.audio_checker.check_bit_depth(file_path)
+                bit_depth, valid = self.audio_checker.check_bit_depth(file_path, self.current_bit_rates)
                 result += f"Bit Depth: {bit_depth} (Valid: {valid})<br>"
                 if not valid:
                     invalid_reasons.append("Invalid Bit Depth")
                 valid_file &= valid
 
-            # Sadece INVALID dosyaları ekle ve INVALID sebeplerini vurgula
             if not valid_file:
                 all_files_valid = False
                 result += f"<b>Status: <span style='color: red;'>INVALID FILE</span></b><br>"
@@ -706,9 +730,11 @@ class AudioInspectorApp(QMainWindow):
                     result += f"Reasons:<br>{reasons}<br><br>"
                 invalid_results += result + "<br>"
 
+            if i < len(files) - 1:
+                invalid_results += "<br>---------------------<br>"
+
             self.current_analysis_type = analysis_type
-            # Progress Bar'ı güncelle
-            progress_value = int(((i + 1) / len(files)) * 100)
+            progress_value = int(((i + 1) / len(selected_files)) * 100)
             self.progress_bar.setValue(progress_value)
 
         # Sonuçları ekrana göster
@@ -723,14 +749,18 @@ class AudioInspectorApp(QMainWindow):
             self.result_display.setStyleSheet("background-color: lightcoral;")
         QApplication.processEvents()
 
+        self.result_text = self.result_display.toPlainText()
+
     def perform_all_analyses(self):
         QApplication.processEvents()
-        files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        selected_files = [item.text() for item in self.file_list.selectedItems()] or \
+                         [self.file_list.item(i).text() for i in range(self.file_list.count())]
+
         self.result_display.clear()
         invalid_results = ""
         all_files_valid = True
 
-        for i, file_path in enumerate(files):
+        for i, file_path in enumerate(selected_files):
             QApplication.processEvents()
             file_name = os.path.basename(file_path)
             result = f"<b>Analyzed File Name: {file_name}</b><br>"
@@ -768,6 +798,7 @@ class AudioInspectorApp(QMainWindow):
                 self.clipping_data.append((file_name, points))
             valid_file &= not clipping
 
+            # Reverb Analizi
             rt60 = self.audio_checker.calculate_reverb(file_path)
             result += f"Reverb Time (RT60): {rt60}<br>"
             if rt60 >= 2:
@@ -777,12 +808,11 @@ class AudioInspectorApp(QMainWindow):
             channel_mode, num_channels = self.audio_checker.check_channel_mode(file_path)
             result += f"Channel Mode: {channel_mode} (Channels: {num_channels})<br>"
             self.channel_modes.append(channel_mode)
-
             if channel_mode not in ["stereo", "mono"]:
                 invalid_reasons.append("Invalid Channel Mode")
             valid_file &= (channel_mode == "stereo" or channel_mode == "mono")
 
-            bit_depth, valid = self.audio_checker.check_bit_depth(file_path)
+            bit_depth, valid = self.audio_checker.check_bit_depth(file_path, self.current_bit_rates)
             result += f"Bit Depth: {bit_depth} (Valid: {valid})<br>"
             if not valid:
                 invalid_reasons.append("Invalid Bit Depth")
@@ -799,9 +829,10 @@ class AudioInspectorApp(QMainWindow):
                     result += f"Reasons:<br>{reasons}<br><br>"
                 invalid_results += result + "<br>"
 
-            progress_value = int(((i + 1) / len(files)) * 100)
+            progress_value = int(((i + 1) / len(selected_files)) * 100)
 
             self.progress_bar.setValue(progress_value)
+
             if all_files_valid:
                 self.result_display.setStyleSheet("background-color: lightgreen;")
             else:
@@ -814,31 +845,35 @@ class AudioInspectorApp(QMainWindow):
             else:
                 self.result_display.setHtml("<b>All files are valid.</b>")
 
-                self.result_text = self.result_display.toPlainText()
-                progress_value = int(((i + 1) / len(files)) * 100)
-                self.progress_bar.setValue(progress_value)
+            if i < len(selected_files) - 1:
+                invalid_results += "<br>---------------------<br>"
+
+        if all_files_valid:
+            self.result_display.setHtml("<b>All files VALID</b>")
+        else:
+            self.result_display.setHtml(invalid_results)
+
+        self.result_text = self.result_display.toPlainText()
 
     def download_pdf(self):
         try:
-            options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf);;All Files (*)",
-                                                       options=options)
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf);;All Files (*)")
             if not file_path:
                 return
+
             if not file_path.endswith('.pdf'):
                 file_path += '.pdf'
 
-            pdf_canvas = canvas.Canvas(file_path, pagesize=letter)
-            text = self.result_text
-
-            if not text.strip():
+            text = self.result_text.strip()
+            if not text:
                 self.result_display.append("\nNo analysis results to download.")
                 return
 
+            pdf_canvas = canvas.Canvas(file_path, pagesize=letter)
             pdf_canvas.drawString(100, 750, "Audio File Inspection Results")
+
             lines = text.split('\n')
             y_position = 700
-
             for line in lines:
                 if y_position < 50:
                     pdf_canvas.showPage()
@@ -846,221 +881,157 @@ class AudioInspectorApp(QMainWindow):
                 pdf_canvas.drawString(100, y_position, line)
                 y_position -= 20
 
+            # Generate and embed the plot into the PDF
+            plot_filename = 'temp_plot.png'
+            self.plot_statistics(plot_filename)
+            pdf_canvas.drawImage(plot_filename, 50, 450, width=500, height=300)
+
             pdf_canvas.save()
 
-            self.result_display.append("\nPDF successfully saved at: " + file_path)
+            # Remove the temporary plot file
+            if os.path.exists(plot_filename):
+                os.remove(plot_filename)
+
+            self.result_display.append(f"\nPDF successfully saved at: {file_path}")
 
         except Exception as e:
-            self.result_display.append("\nError while saving PDF: " + str(e))
+            self.result_display.append(f"\nError while saving PDF: {str(e)}")
 
     def download_excel(self):
-        try:
-            options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save Excel", "", "Excel Files (*.xlsx);;All Files (*)",
-                                                       options=options)
-
-            if not file_path:
-                return
-
-            if not file_path.endswith('.xlsx'):
-                file_path += '.xlsx'
-
-            text = self.result_text
-
-            if not text.strip():
-                self.result_display.append("\nNo analysis results to download.")
-                return
-
-            lines = text.split('\n')
-            data = [line.split() for line in lines if line.strip()]
-
-            df = pd.DataFrame(data)
-            df.to_excel(file_path, index=False, header=False)
-
-            self.result_display.append("\nExcel successfully saved at: " + file_path)
-
-        except Exception as e:
-            self.result_display.append("\nError while saving Excel: " + str(e))
+        self.download_file("Excel", "xlsx", "Excel Files (*.xlsx);;All Files (*)")
 
     def download_csv(self):
-        try:
-            options = QFileDialog.Options()
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save CSV", "", "CSV Files (*.csv);;All Files (*)",
-                                                       options=options)
+        self.download_file("CSV", "csv", "CSV Files (*.csv);;All Files (*)")
 
+    def download_file(self, file_type, extension, dialog_filter):
+        try:
+            file_path, _ = QFileDialog.getSaveFileName(self, f"Save {file_type}", "", dialog_filter)
             if not file_path:
                 return
 
-            if not file_path.endswith('.csv'):
-                file_path += '.csv'
+            if not file_path.endswith(f'.{extension}'):
+                file_path += f'.{extension}'
 
-            text = self.result_text
-
-            if not text.strip():
-                self.result_display.append("\nNo analysis results to download.")
+            text = self.result_text.strip()
+            if not text:
+                self.result_display.append(f"\nNo analysis results to download.")
                 return
 
-            lines = text.split('\n')
-            data = [line.split() for line in lines if line.strip()]
-            df = pd.DataFrame(data)
-            df.to_csv(file_path, index=False, header=False)
+            lines = [line.split() for line in text.split('\n') if line.strip()]
+            df = pd.DataFrame(lines)
 
-            self.result_display.append("\nCSV successfully saved at: " + file_path)
+            if extension == "xlsx":
+                with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
+                    df.to_excel(writer, index=False, header=False)
+
+                    # Embed plot into Excel
+                    plot_filename = 'temp_plot.png'
+                    self.plot_statistics(plot_filename)
+                    workbook = writer.book
+                    worksheet = writer.sheets['Sheet1']
+                    worksheet.insert_image('Z10', plot_filename)
+
+                self.result_display.append(f"\nExcel successfully saved at: {file_path}")
+            else:
+                df.to_csv(file_path, index=False, header=False)
+
+                # CSV doesn't support image embedding, so notify the user
+                self.result_display.append(f"\nCSV successfully saved at: {file_path}")
+
+            # Clean up the plot file
+            if os.path.exists('temp_plot.png'):
+                os.remove('temp_plot.png')
 
         except Exception as e:
-            self.result_display.append("\nError while saving CSV: " + str(e))
+            self.result_display.append(f"\nError while saving {file_type}: {str(e)}")
 
     def download_statistics(self):
-        options = QFileDialog.Options()
-        filename, _ = QFileDialog.getSaveFileName(self, "Save Statistics", "", "PNG Files (*.png)", options=options)
+        filename, _ = QFileDialog.getSaveFileName(self, "Save Statistics", "", "PNG Files (*.png)")
+        if filename and (self.noise_levels or self.snr_levels or self.clipping_data or self.channel_modes):
+            self.plot_statistics(filename)
 
-        if filename and (len(self.noise_levels) > 0 or len(self.snr_levels) > 0 or len(self.clipping_data) > 0 or len(
-                self.channel_modes) > 0):
-
-            plt.figure(figsize=(15, 10))
-            if self.current_analysis_type == "All":
-                # Noise Levels Plot
-                plt.subplot(2, 2, 1)
-                plt.bar(range(len(self.noise_levels)), self.noise_levels, color='blue')
-                plt.title('Noise Levels')
-                plt.xlabel('File Number')
-                plt.ylabel('Level (dB)')
-
-                # SNR Levels Plot
-                plt.subplot(2, 2, 2)
-                plt.bar(range(len(self.snr_levels)), self.snr_levels, color='orange')
-                plt.title('SNR Levels')
-                plt.xlabel('File Number')
-                plt.ylabel('Level (dB)')
-
-                # Clipping Plot
-                plt.subplot(2, 2, 3)
-                plt.plot(self.clipping_data, label='Clipping', color='red')
-                plt.title('Clipping')
-                plt.xlabel('File Number')
-                plt.ylabel('Clipping Level')
-
-                # Channel Modes Plot
-                plt.subplot(2, 2, 4)
-                labels = ['Mono' if mode == "mono" else "Stereo" for mode in self.channel_modes]
-                unique_modes, counts = np.unique(labels, return_counts=True)
-                plt.bar(unique_modes, counts, color='orange')
-                plt.title('Channel Modes')
-                plt.ylabel('Counts')
-                plt.xlabel('Channel Type')
-
-                plt.tight_layout()
-
-            elif self.current_analysis_type == "Analyze SNR":
-                plt.bar(range(len(self.snr_levels)), self.snr_levels, color='green')
-                plt.title('SNR Levels')
-                plt.ylabel('Level (dB)')
-                plt.xlabel('File Number')
-
-            elif self.current_analysis_type == "Detect Clipping":
-                plt.plot(self.clipping_data, label='Clipping', color='red')
-                plt.title('Clipping Detection')
-                plt.ylabel('Clipping Level')
-                plt.xlabel('File Number')
-
-            elif self.current_analysis_type == "Inspect Channel Mode":
-                labels = ['Mono' if mode == "mono" else "Stereo" for mode in self.channel_modes]
-                unique_modes, counts = np.unique(labels, return_counts=True)
-                plt.bar(unique_modes, counts, color='orange')
-                plt.title('Channel Modes')
-                plt.ylabel('Counts')
-                plt.xlabel('Channel Type')
-
-            elif self.current_analysis_type == "Analyze Background Noise":
-                plt.bar(range(len(self.noise_levels)), self.noise_levels, color='blue')
-                plt.title('Noise Levels')
-                plt.ylabel('Level (dB)')
-                plt.xlabel('File Number')
-
-            plt.savefig(filename)
-            plt.close()
-
-    def show_statistics(self):
-        previous_results = self.result_display.toHtml()
-
-        self.result_display.clear()
-
+    def plot_statistics(self, filename):
         plt.figure(figsize=(15, 10))
 
         if self.current_analysis_type == "All":
-            # Noise Levels Plot
-            plt.subplot(2, 2, 1)
-            plt.bar(range(len(self.noise_levels)), self.noise_levels, color='blue')
-            plt.title('Noise Levels')
-            plt.xlabel('File Index')
-            plt.ylabel('Level (dB)')
-            plt.xticks(range(len(self.noise_levels)), rotation=45)
-
-            # SNR Levels Plot
-            plt.subplot(2, 2, 2)
-            plt.bar(range(len(self.snr_levels)), self.snr_levels, color='orange')
-            plt.title('SNR Levels')
-            plt.xlabel('File Index')
-            plt.ylabel('Level (dB)')
-            plt.xticks(range(len(self.snr_levels)), rotation=45)
-
-            # Clipping Plot
-            plt.subplot(2, 2, 3)
-            plt.plot(self.clipping_data, label='Clipping', color='red')
-            plt.title('Clipping')
-            plt.xlabel('File Index')
-            plt.ylabel('Clipping Level')
-            plt.xticks(range(len(self.clipping_data)), rotation=45)
-
-            # Channel Modes Plot
-            plt.subplot(2, 2, 4)
-            labels = ['Mono' if mode == "mono" else "Stereo" for mode in self.channel_modes]
-            unique_modes, counts = np.unique(labels, return_counts=True)
-            plt.bar(unique_modes, counts, color='orange')
-            plt.title('Channel Modes')
-            plt.ylabel('Counts')
-            plt.xlabel('Channel Type')
-
+            self.create_all_plots()
         elif self.current_analysis_type == "Analyze SNR":
-            plt.bar(range(len(self.snr_levels)), self.snr_levels, color='green')
-            plt.title('SNR Levels')
-            plt.ylabel('Level (dB)')
-            plt.xlabel('File Index')
-            plt.xticks(range(len(self.snr_levels)), rotation=45)
-
+            self.create_sn_plot()
         elif self.current_analysis_type == "Detect Clipping":
-            plt.plot(self.clipping_data, label='Clipping', color='red')
-            plt.title('Clipping Detection')
-            plt.ylabel('Clipping Level')
-            plt.xlabel('File Index')
-            plt.xticks(range(len(self.clipping_data)), rotation=45)
-
+            self.create_clipping_plot()
         elif self.current_analysis_type == "Inspect Channel Mode":
-            labels = ['Mono' if mode == "mono" else "Stereo" for mode in self.channel_modes]
-            unique_modes, counts = np.unique(labels, return_counts=True)
-            plt.bar(unique_modes, counts, color='orange')
-            plt.title('Channel Modes')
-            plt.ylabel('Counts')
-            plt.xlabel('Channel Type')
-
+            self.create_channel_mode_plot()
         elif self.current_analysis_type == "Analyze Background Noise":
-            plt.bar(range(len(self.noise_levels)), self.noise_levels, color='blue')
-            plt.title('Noise Levels')
-            plt.ylabel('Level (dB)')
-            plt.xlabel('File Index')
-            plt.xticks(range(len(self.noise_levels)), rotation=45)
+            self.create_background_noise_plot()
+        else:
+            self.result_display.append("No valid analysis type for plotting.")
+            return
 
-        plt.tight_layout()
-
-        # Save the plot to a file
-        plt.savefig('plot.png', bbox_inches='tight', dpi=150)
+        plt.savefig(filename)
         plt.close()
 
-        # Display the plot in result_display
+    def create_all_plots(self):
+        self.create_bar_plot(self.noise_levels, 'Noise Levels', 'Level (dB)', 'File Number', color='blue', position=1)
+        self.create_bar_plot(self.snr_levels, 'SNR Levels', 'Level (dB)', 'File Number', color='orange', position=2)
+        self.create_line_plot(self.clipping_data, 'Clipping', 'Clipping Level', 'File Number', color='red', position=3)
+        self.create_channel_mode_plot()
+
+    def create_snr_plot(self):
+        self.create_bar_plot(self.snr_levels, 'SNR Levels', 'Level (dB)', 'File Number', color='green', position=1)
+
+    def create_clipping_plot(self):
+        self.create_line_plot(self.clipping_data, 'Clipping Detection', 'Clipping Level', 'File Number', color='red',
+                              position=1)
+
+    def create_background_noise_plot(self):
+        self.create_bar_plot(self.noise_levels, 'Noise Levels', 'Level (dB)', 'File Number', color='blue', position=1)
+
+    def create_bar_plot(self, data, title, ylabel, xlabel, color, position):
+        plt.subplot(2, 2, position)
+        plt.bar(range(len(data)), data, color=color)
+        plt.title(title)
+        plt.ylabel(ylabel)
+        plt.xlabel(xlabel)
+
+    def create_line_plot(self, data, title, ylabel, xlabel, color, position):
+        plt.subplot(2, 2, position)
+        plt.plot(data, label=title, color=color)
+        plt.title(title)
+        plt.ylabel(ylabel)
+        plt.xlabel(xlabel)
+
+    def create_channel_mode_plot(self):
+        labels = ['Mono' if mode == "mono" else "Stereo" for mode in self.channel_modes]
+        unique_modes, counts = np.unique(labels, return_counts=True)
+        plt.subplot(2, 2, 4)
+        plt.bar(unique_modes, counts, color='orange')
+        plt.title('Channel Modes')
+        plt.ylabel('Counts')
+        plt.xlabel('Channel Type')
+
+    def show_statistics(self):
+        previous_results = self.result_display.toHtml()
+        self.result_display.clear()
+        plt.figure(figsize=(15, 10))
+
+        if self.current_analysis_type == "All":
+            self.create_all_plots()
+        elif self.current_analysis_type == "Analyze SNR":
+            self.create_bar_plot(self.snr_levels, 'SNR Levels', 'Level (dB)', 'File Index', color='green', position=1)
+        elif self.current_analysis_type == "Detect Clipping":
+            self.create_line_plot(self.clipping_data, 'Clipping Detection', 'Clipping Level', 'File Index', color='red',
+                                  position=1)
+        elif self.current_analysis_type == "Inspect Channel Mode":
+            self.create_channel_mode_plot()
+        elif self.current_analysis_type == "Analyze Background Noise":
+            self.create_bar_plot(self.noise_levels, 'Noise Levels', 'Level (dB)', 'File Index', color='blue',
+                                 position=1)
+
+        plt.tight_layout()
+        plt.savefig('plot.png', bbox_inches='tight', dpi=150)
+        plt.close()
         pixmap = QPixmap('plot.png')
         self.result_display.insertHtml('<img src="plot.png" width="800" />')
-
-        # Metin sonuçlarını tekrar ekleyelim
         self.result_display.insertHtml(previous_results)
 
         # Delete the saved plot file after displaying
@@ -1068,7 +1039,8 @@ class AudioInspectorApp(QMainWindow):
             os.remove('plot.png')
 
     def remove_selected_files(self):
-        for item in self.file_list.selectedItems():
+        selected_items = self.file_list.selectedItems()
+        for item in selected_items:
             self.file_list.takeItem(self.file_list.row(item))
 
     def resource_path(self, relative_path):
@@ -1085,3 +1057,5 @@ if __name__ == '__main__':
     window = AudioInspectorApp()
     window.show()
     sys.exit(app.exec_())
+
+
