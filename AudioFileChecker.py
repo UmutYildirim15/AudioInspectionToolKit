@@ -91,14 +91,21 @@ class AudioFileChecker:
             codec = info.get('codec_name', '').lower()
             format_name = info.get('format', '').lower()
 
-            if 'alac' in codec or 'alac' in format_name:
-                bit_depth = int(info.get('bits_per_sample', 16))
+            # bits_per_sample kontrolü
+            bit_depth_value = info.get('bits_per_sample', None)
+            if bit_depth_value is not None:
+                bit_depth = int(bit_depth_value)
             else:
-                bit_depth = int(info.get('bits_per_sample', 16)) if int(info.get('bits_per_sample', 0)) != 0 else 16
+                bit_depth = 16  # Varsayılan değer
+
+            if 'alac' in codec or 'alac' in format_name:
+                # ALAC dosyaları için bit derinliğini ayarlayın
+                bit_depth = bit_depth if bit_depth else 16
 
             return bit_depth, str(bit_depth) in bit_rates
 
         except Exception as e:
+            print(f"Error processing {file_path}: {e}")
             return None, False
 
     def calculate_reverb(self, file_path):
@@ -107,3 +114,38 @@ class AudioFileChecker:
             return None
 
         return np.sqrt(np.mean(y**2))
+
+    def detect_copy_paste(self, source_file, target_file):
+        y_source, sr_source = self.load_audio(source_file)
+        y_target, sr_target = self.load_audio(target_file)
+
+        if y_source is None or y_target is None:
+            return False, "Audio files could not be loaded."
+
+        source_spectrogram = np.abs(librosa.stft(y_source))
+        target_spectrogram = np.abs(librosa.stft(y_target))
+
+        source_length = source_spectrogram.shape[1]
+        target_length = target_spectrogram.shape[1]
+
+        pattern_length = min(source_length, target_length)
+
+        if source_length > target_length:
+            pattern = target_spectrogram[:, :pattern_length]
+            spectrogram_to_search = source_spectrogram
+        else:
+            pattern = source_spectrogram[:, :pattern_length]
+            spectrogram_to_search = target_spectrogram
+
+        search_length = spectrogram_to_search.shape[1]
+        match_indices = []
+
+        for start in range(search_length - pattern_length + 1):
+            segment = spectrogram_to_search[:, start:start + pattern_length],
+            if np.all(np.isclose(segment, pattern, atol=1e-1)):
+                match_indices.append(start)
+
+        if match_indices:
+            return True, f"Copy/paste detected at file : {target_file}"
+        else:
+            return False, "" # Maybe an output?

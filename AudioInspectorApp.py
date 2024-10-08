@@ -1,7 +1,5 @@
 import os
 import sys
-import tempfile
-import xlsxwriter
 import numpy as np
 import pandas as pd
 from PyQt5.QtGui import QPixmap, QIcon
@@ -72,10 +70,29 @@ class AudioInspectorApp(QMainWindow):
                                     """)
         self.exit_button.clicked.connect(self.close)
 
-        exit_button_layout = QHBoxLayout()
-        exit_button_layout.addStretch()
-        exit_button_layout.addWidget(self.exit_button)
-        layout.addLayout(exit_button_layout)
+        self.copy_paste_button = QPushButton('Copy/Paste Detect', self)
+        self.copy_paste_button.setStyleSheet(""" 
+                                        QPushButton {
+                                            background-color: #3498db; /* Mavi */
+                                            color: white;
+                                            border: none;
+                                            padding: 10px;
+                                            border-radius: 5px;
+                                            font-size: 14px;
+                                            width: 160px;
+                                            height: 20px;
+                                        }
+                                        QPushButton:hover {
+                                            background-color: #2980b9;
+                                        }
+                                    """)
+        self.copy_paste_button.clicked.connect(self.upload_source_file)
+
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.copy_paste_button)
+        button_layout.addWidget(self.exit_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
 
         self.file_list = QListWidget(self)
         self.file_list.setSelectionMode(QListWidget.MultiSelection)
@@ -131,7 +148,8 @@ class AudioInspectorApp(QMainWindow):
             "Detect Clipping",
             "Analyze Reverb",
             "Inspect Channel Mode",
-            "Verify Bit Depth"
+            "Verify Bit Depth",
+            "Copy/Paste Detect"
         ])
         layout.addWidget(self.analysis_type)
 
@@ -427,7 +445,7 @@ class AudioInspectorApp(QMainWindow):
                                 font-size: 14px;
                             }
                         """)
-        self.result_display.setMinimumHeight(240)  # Minimum yükseklik ayarla
+        self.result_display.setMinimumHeight(240)
         layout.addWidget(self.result_display)
 
         self.download_buttons_layout = QHBoxLayout()
@@ -547,6 +565,49 @@ class AudioInspectorApp(QMainWindow):
         for file in files:
             self.file_list.addItem(file)
 
+    def upload_source_file(self):
+        options = QFileDialog.Options()
+        copied_files = []
+        source_file_path, _ = QFileDialog.getOpenFileName(self, "Select SOURCE Audio File", "",
+                                                          "Audio Files (*.wav *.mp3)", options=options)
+        if not source_file_path:
+            self.result_display.append("Source file selection cancelled.")
+            return
+
+        target_file_paths, _ = QFileDialog.getOpenFileNames(self, "Select TARGET Audio Files", "",
+                                                            "Audio Files (*.wav *.mp3)", options=options)
+        if not target_file_paths:
+            self.result_display.append("Target file selection cancelled.")
+            return
+
+        self.result_display.clear()
+        self.result_display.append(f"Selected source file: {source_file_path}")
+
+        try:
+            found_any_copy_paste = False
+
+            for target_file_path in target_file_paths:
+
+                result, message = self.audio_checker.detect_copy_paste(source_file_path, target_file_path)
+
+                if result:
+                    found_any_copy_paste = True
+                    self.result_display.append(
+                        f"<span style='color: yellow;'>Target file: {target_file_path.split('/')[-1]}<br>{message}</span>")
+                    copied_files.append(target_file_path.split('/')[-1])
+            if not found_any_copy_paste:
+                self.result_display.append("No copy-paste patterns found in the selected target files.")
+                self.result_display.setStyleSheet("background-color: lightgreen;")
+            else:
+                self.result_display.setStyleSheet("background-color: lightcoral;")
+
+            return found_any_copy_paste, copied_files
+
+        except Exception as e:
+            self.result_display.append(f"An error occurred: {str(e)}")
+
+
+
     def update_inputs(self):
         analysis_type = self.analysis_type.currentText()
         if analysis_type == "Verify Format and Sampling Rate":
@@ -653,15 +714,26 @@ class AudioInspectorApp(QMainWindow):
         self.snr_levels = []
         self.clipping_data = []
         all_files_valid = True
+        result = ""
 
         invalid_results = ""
+        invalid_reasons = []
+        if analysis_type == "Copy/Paste Detect":
+            QApplication.processEvents()
+            output, copied_files = self.upload_source_file()
+            if output:
+                all_files_valid = False
+                result += f"<b>Status: <span style='color: red;'>INVALID FILE</span></b><br>"
+                result += "<br>"
+                for file in copied_files:
+                    result += f"<span style='color: yellow;'>Copy/Paste File: {file}</span><br><br>"
+                invalid_results += result + "<br>"
 
         for i, file_path in enumerate(selected_files):
             QApplication.processEvents()
             file_name = os.path.basename(file_path)
             result = f"<b>Analyzed File Name: {file_name}</b><br>"
             valid_file = True
-            invalid_reasons = []
 
             if analysis_type == "Verify Format and Sampling Rate":
                 format_ok, file_format = self.audio_checker.check_format(file_path)
@@ -737,7 +809,6 @@ class AudioInspectorApp(QMainWindow):
             progress_value = int(((i + 1) / len(selected_files)) * 100)
             self.progress_bar.setValue(progress_value)
 
-        # Sonuçları ekrana göster
         if invalid_results:
             self.result_display.setHtml(invalid_results)
         else:
@@ -817,7 +888,20 @@ class AudioInspectorApp(QMainWindow):
             if not valid:
                 invalid_reasons.append("Invalid Bit Depth")
             valid_file &= valid
-            self.current_analysis_type = "All"
+
+            # Copy/Paste tespiti
+            """source_file_path, _ = QFileDialog.getOpenFileName(self, "Select Source Audio File for Copy/Paste Detection",
+                                                              "",
+                                                              "Audio Files (*.wav *.mp3)",
+                                                              options=QFileDialog.Options())
+            if not source_file_path:
+                self.result_display.append("Source file selection cancelled.<br>")
+            else:
+                result, message = self.detect_copy_paste(source_file_path, file_path)
+                result += f"{message}<br>"
+                if result:
+                    invalid_reasons.append("Copy/Paste Detected")
+                valid_file &= not result
 
             if not valid_file:
                 all_files_valid = False
@@ -825,12 +909,12 @@ class AudioInspectorApp(QMainWindow):
                 if invalid_reasons:
                     reasons = "<br>".join(
                         [f"<b><span style='background-color: yellow;'>{reason}</span></b>" for reason in
-                         invalid_reasons])
+                         invalid_reasons]
+                    )
                     result += f"Reasons:<br>{reasons}<br><br>"
-                invalid_results += result + "<br>"
+                invalid_results += result + "<br>"""""
 
             progress_value = int(((i + 1) / len(selected_files)) * 100)
-
             self.progress_bar.setValue(progress_value)
 
             if all_files_valid:
