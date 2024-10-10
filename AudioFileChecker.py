@@ -1,3 +1,5 @@
+import os
+
 import librosa
 import numpy as np
 from pydub.utils import mediainfo
@@ -115,6 +117,8 @@ class AudioFileChecker:
 
         return np.sqrt(np.mean(y**2))
 
+    import os  # Dosya adını almak için os modülünü dahil ediyoruz.
+
     def detect_copy_paste(self, source_file, target_file):
         y_source, sr_source = self.load_audio(source_file)
         y_target, sr_target = self.load_audio(target_file)
@@ -125,27 +129,27 @@ class AudioFileChecker:
         source_spectrogram = np.abs(librosa.stft(y_source))
         target_spectrogram = np.abs(librosa.stft(y_target))
 
-        source_length = source_spectrogram.shape[1]
+        source_half_length = source_spectrogram.shape[1] // 2
+        source_half_spectrogram = source_spectrogram[:, :source_half_length]
+
         target_length = target_spectrogram.shape[1]
 
-        pattern_length = min(source_length, target_length)
+        pattern_length = min(source_half_length, target_length)
 
-        if source_length > target_length:
-            pattern = target_spectrogram[:, :pattern_length]
-            spectrogram_to_search = source_spectrogram
-        else:
-            pattern = source_spectrogram[:, :pattern_length]
-            spectrogram_to_search = target_spectrogram
+        pattern = source_half_spectrogram[:, :pattern_length]
+        spectrogram_to_search = target_spectrogram
 
         search_length = spectrogram_to_search.shape[1]
         match_indices = []
-
         for start in range(search_length - pattern_length + 1):
-            segment = spectrogram_to_search[:, start:start + pattern_length],
+            segment = spectrogram_to_search[:, start:start + pattern_length]
             if np.all(np.isclose(segment, pattern, atol=1e-1)):
                 match_indices.append(start)
 
         if match_indices:
-            return True, f"Copy/paste detected at file : {target_file}"
+            target_file_name = os.path.basename(target_file)
+            return True, f"Copy/paste detected at file: {target_file_name}"
         else:
-            return False, "" # Maybe an output?
+            return False, "No copy-paste pattern found."
+
+
