@@ -2,10 +2,10 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-from PyQt5.QtGui import QPixmap, QIcon
+from PyQt5.QtGui import QPixmap, QIcon, QFont
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton,
                              QFileDialog, QLabel, QVBoxLayout, QWidget, QListWidget,
-                             QProgressBar, QTextEdit, QComboBox, QLineEdit, QHBoxLayout)
+                             QProgressBar, QTextEdit, QComboBox, QLineEdit, QHBoxLayout, QListWidgetItem)
 from PyQt5.QtCore import Qt
 from matplotlib import pyplot as plt
 from reportlab.lib.pagesizes import letter
@@ -48,14 +48,17 @@ class AudioInspectorApp(QMainWindow):
         layout.addWidget(logo)
 
         self.setStyleSheet("background-color: #aee3e5;")
-        self.label = QLabel("Drag and drop audio files here", self)
+        self.label = QLabel("SMARTI Audio Inspection Toolkit", self)
+        font = QFont("Arial", 8, QFont.Bold)
+        self.label.setFont(font)
+        self.label.setStyleSheet("color: black;")
         self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
 
         self.exit_button = QPushButton('Exit', self)
         self.exit_button.setStyleSheet(""" 
                                         QPushButton {
-                                            background-color: #e74c3c; /* Kırmızı */
+                                            background-color: #e74c3c;
                                             color: white;
                                             border: none;
                                             padding: 10px;
@@ -73,7 +76,7 @@ class AudioInspectorApp(QMainWindow):
         self.copy_paste_button = QPushButton('Copy/Paste Detect', self)
         self.copy_paste_button.setStyleSheet(""" 
                                         QPushButton {
-                                            background-color: #3498db; /* Mavi */
+                                            background-color: #3498db; 
                                             color: white;
                                             border: none;
                                             padding: 10px;
@@ -107,6 +110,13 @@ class AudioInspectorApp(QMainWindow):
                                 background-color: #e0e0e0;
                             }
                         """)
+
+        self.placeholder_item = QListWidgetItem("Drag and drop audio files here.", self.file_list)
+        self.placeholder_item.setForeground(Qt.gray)
+        self.placeholder_item.setFlags(Qt.ItemIsEnabled)
+
+        self.file_list.addItem(self.placeholder_item)
+
         layout.addWidget(self.file_list)
 
         self.setAcceptDrops(True)
@@ -149,7 +159,8 @@ class AudioInspectorApp(QMainWindow):
             "Analyze Reverb",
             "Inspect Channel Mode",
             "Verify Bit Depth",
-            "Copy/Paste Detect"
+            "Copy/Paste Detect",
+            "Spectrogram Analysis"
         ])
         layout.addWidget(self.analysis_type)
 
@@ -159,24 +170,25 @@ class AudioInspectorApp(QMainWindow):
 
         # Target Sample Rate input
         self.target_rate_input = QLineEdit(self)
-        self.target_rate_input.setPlaceholderText("Enter New Target Sample Rate (Default 48000 Hz)")
-        self.target_rate_input.setFixedWidth(500)  # Half-width adjustment
-        self.target_rate_input.editingFinished.connect(self.change_rate)
+        self.target_rate_input.setPlaceholderText("Enter New Target Sample Rate (e.g., 48000 Hz)")
+        self.target_rate_input.setFixedWidth(500)
         self.target_rate_input.setStyleSheet(""" 
-                                        QLineEdit {
-                                            background-color: #f9f9f9;
-                                            border: 1px solid #ccc;
-                                            border-radius: 5px;
-                                            padding: 5px;
-                                        }
-                                        QLineEdit:focus {
-                                            border: 1px solid #007BFF;
-                                        }
-                                    """)
+                                            QLineEdit {
+                                                background-color: #f9f9f9;
+                                                border: 1px solid #ccc;
+                                                border-radius: 5px;
+                                                padding: 5px;
+                                            }
+                                            QLineEdit:focus {
+                                                border: 1px solid #007BFF;
+                                            }
+                                        """)
 
         # Dropdown for Current Sampling Rates
         self.sampling_rate_dropdown = QComboBox(self)
         self.sampling_rate_dropdown.setStyleSheet(dropdown_style)
+        self.sampling_rate_dropdown.addItem("Select a sampling rate to remove...")
+        self.sampling_rate_dropdown.setCurrentIndex(0)
         self.sampling_rate_dropdown.addItems([str(rate) for rate in self.target_rates])
 
         # Add Button for Sampling Rate
@@ -238,7 +250,6 @@ class AudioInspectorApp(QMainWindow):
                                 }
                             """)
 
-
         self.upload_files_button = QPushButton('Upload New Files', self)
         self.upload_files_button.clicked.connect(self.upload_files)
         self.upload_files_button.setStyleSheet(""" 
@@ -299,6 +310,8 @@ class AudioInspectorApp(QMainWindow):
         # Dropdown for current formats
         self.format_dropdown = QComboBox(self)
         self.format_dropdown.setStyleSheet(dropdown_style)
+        self.format_dropdown.addItem("Select a audio format to remove...")
+        self.format_dropdown.setCurrentIndex(0)
         self.format_dropdown.addItems(self.supported_formats)
 
         # Add Button for format
@@ -384,6 +397,8 @@ class AudioInspectorApp(QMainWindow):
                             """)
         self.current_bit_rates_dropdown = QComboBox(self)
         self.current_bit_rates_dropdown.setStyleSheet(dropdown_style)
+        self.current_bit_rates_dropdown.addItem("Select a bit depth to remove...")
+        self.current_bit_rates_dropdown.setCurrentIndex(0)
         self.current_bit_rates_dropdown.addItems([str(bit) for bit in self.bit_rates])
 
         self.add_bit_rate_button.clicked.connect(self.add_bit_rate)
@@ -554,6 +569,16 @@ class AudioInspectorApp(QMainWindow):
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
 
+    def update_placeholder(self):
+        if self.file_list.count() == 0:
+            self.file_list.addItem(self.placeholder_item)
+        else:
+            # Remove placeholder if there are other items
+            for i in range(self.file_list.count()):
+                if self.file_list.item(i) == self.placeholder_item:
+                    self.file_list.takeItem(i)
+                    break
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -564,13 +589,14 @@ class AudioInspectorApp(QMainWindow):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         for file in files:
             self.file_list.addItem(file)
+        self.update_placeholder()
 
     def upload_source_file(self):
         options = QFileDialog.Options()
         copied_files = []
-        source_file_path, _ = QFileDialog.getOpenFileName(self, "Select SOURCE Audio File", "",
-                                                          "Audio Files (*.wav *.mp3)", options=options)
-        if not source_file_path:
+        source_file_paths, _ = QFileDialog.getOpenFileNames(self, "Select SOURCE Audio Files", "",
+                                                            "Audio Files (*.wav *.mp3)", options=options)
+        if not source_file_paths:
             self.result_display.append("Source file selection cancelled.")
             return
 
@@ -581,20 +607,24 @@ class AudioInspectorApp(QMainWindow):
             return
 
         self.result_display.clear()
-        self.result_display.append(f"Selected source file: {source_file_path}")
+        self.result_display.append(
+            f"Selected source files: {', '.join([os.path.basename(path) for path in source_file_paths])}")
 
         try:
             found_any_copy_paste = False
 
-            for target_file_path in target_file_paths:
+            # Detect copy-paste for each combination of source and target files
+            results = self.audio_checker.detect_copy_paste(source_file_paths, target_file_paths)
 
-                result, message = self.audio_checker.detect_copy_paste(source_file_path, target_file_path)
+            for result in results:
+                source_file, is_copied, message = result
 
-                if result:
+                if is_copied:
                     found_any_copy_paste = True
                     self.result_display.append(
-                        f"<span style='color: yellow;'>Target file: {target_file_path.split('/')[-1]}<br>{message}</span>")
-                    copied_files.append(target_file_path.split('/')[-1])
+                        f"<span style='color: yellow;'>Source file: {os.path.basename(source_file)}<br>{message}</span>")
+                    copied_files.append(os.path.basename(source_file))
+
             if not found_any_copy_paste:
                 self.result_display.append("No copy-paste patterns found in the selected target files.")
                 self.result_display.setStyleSheet("background-color: lightgreen;")
@@ -605,8 +635,6 @@ class AudioInspectorApp(QMainWindow):
 
         except Exception as e:
             self.result_display.append(f"An error occurred: {str(e)}")
-
-
 
     def update_inputs(self):
         analysis_type = self.analysis_type.currentText()
@@ -633,27 +661,40 @@ class AudioInspectorApp(QMainWindow):
 
     def remove_format(self):
         selected_format = self.format_dropdown.currentText()
-        if selected_format:
+        if selected_format and selected_format != 'Select a audio format to remove...':
             self.supported_formats.remove(selected_format)
             self.format_dropdown.removeItem(self.format_dropdown.currentIndex())
             self.update_current_formats()
 
-
     def add_sampling_rate(self):
         try:
-            new_rate = int(self.target_rate_input.text())
+            new_rate_str = self.target_rate_input.text().strip()
+
+            if not new_rate_str:
+                raise ValueError("Sampling rate cannot be empty.")
+
+            new_rate = int(new_rate_str)
+
+            if new_rate <= 0:
+                raise ValueError("Sampling rate must be a positive number.")
+
             if new_rate not in self.target_rates:
                 self.target_rates.append(new_rate)
                 self.sampling_rate_dropdown.addItem(str(new_rate))
                 self.update_current_formats()
+                self.result_display.append(f"Sampling rate {new_rate} Hz added successfully.")
             else:
                 self.result_display.append(f"Sampling rate {new_rate} Hz is already in the list.")
-        except ValueError:
-            self.result_display.append("Error: Invalid sampling rate input.")
+
+        except ValueError as ve:
+            self.result_display.append(f"Error: {ve}")
+
+        except Exception as e:
+            self.result_display.append(f"Unexpected error occurred: {e}")
 
     def remove_sampling_rate(self):
         selected_rate = self.sampling_rate_dropdown.currentText()
-        if selected_rate:
+        if selected_rate and selected_rate != 'Select a sampling rate to remove...':
             self.target_rates.remove(int(selected_rate))
             self.sampling_rate_dropdown.removeItem(self.sampling_rate_dropdown.currentIndex())
             self.update_current_formats()
@@ -683,10 +724,12 @@ class AudioInspectorApp(QMainWindow):
             self.current_bit_rates.append(new_bit_rate)
             self.update_bit_rate_dropdown()
             self.update_current_formats()
+        else:
+            self.result_display.append("Error: Invalid bit depth input. Please enter a valid bit depth.")
 
     def remove_bit_rate(self):
         current_bit_rate = self.current_bit_rates_dropdown.currentText()
-        if current_bit_rate in self.current_bit_rates:
+        if current_bit_rate in self.current_bit_rates and current_bit_rate != 'Select a bit depth to remove...':
             self.current_bit_rates.remove(current_bit_rate)
             self.update_bit_rate_dropdown()
             self.update_current_formats()
@@ -707,6 +750,9 @@ class AudioInspectorApp(QMainWindow):
         QApplication.processEvents()
         selected_files = [item.text() for item in self.file_list.selectedItems()] or \
                          [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        if len(selected_files) != 0:
+            if selected_files[0] == 'Drag and drop audio files here.':
+                selected_files.remove('Drag and drop audio files here.')
         analysis_type = self.analysis_type.currentText()
         files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
         self.result_display.clear()
@@ -728,6 +774,14 @@ class AudioInspectorApp(QMainWindow):
                 for file in copied_files:
                     result += f"<span style='color: yellow;'>Copy/Paste File: {file}</span><br><br>"
                 invalid_results += result + "<br>"
+
+
+        elif analysis_type == "Spectrogram Analysis":
+            if not selected_files:
+                self.result_display.append("Please select a file to create a spectrogram plot.")
+            else:
+                result += self.audio_checker.plot_spectrogram(selected_files[0])
+                self.result_display.setHtml(result)
 
         for i, file_path in enumerate(selected_files):
             QApplication.processEvents()
@@ -803,7 +857,7 @@ class AudioInspectorApp(QMainWindow):
                 invalid_results += result + "<br>"
 
             if i < len(files) - 1:
-                invalid_results += "<br>---------------------<br>"
+                invalid_results += "<br><br>"
 
             self.current_analysis_type = analysis_type
             progress_value = int(((i + 1) / len(selected_files)) * 100)
@@ -811,11 +865,17 @@ class AudioInspectorApp(QMainWindow):
 
         if invalid_results:
             self.result_display.setHtml(invalid_results)
+        elif len(selected_files) == 0:
+            self.result_display.setStyleSheet("background-color: lightcoral;")
+            self.result_display.setHtml("<b>No files selected.</b>")
         else:
-            self.result_display.setHtml("<b>All files are valid.</b>")
+            self.result_display.setHtml("<b>All selected files are VALID.</b>")
 
         if all_files_valid:
-            self.result_display.setStyleSheet("background-color: lightgreen;")
+            if len(selected_files) == 0:
+                self.result_display.setStyleSheet("background-color: lightcoral;")
+            else:
+                self.result_display.setStyleSheet("background-color: lightgreen;")
         else:
             self.result_display.setStyleSheet("background-color: lightcoral;")
         QApplication.processEvents()
@@ -827,10 +887,12 @@ class AudioInspectorApp(QMainWindow):
         selected_files = [item.text() for item in self.file_list.selectedItems()] or \
                          [self.file_list.item(i).text() for i in range(self.file_list.count())]
 
+        if len(selected_files) != 0:
+            if selected_files[0] == 'Drag and drop audio files here.':
+                selected_files.remove('Drag and drop audio files here.')
         self.result_display.clear()
         invalid_results = ""
         all_files_valid = True
-
         for i, file_path in enumerate(selected_files):
             QApplication.processEvents()
             file_name = os.path.basename(file_path)
@@ -869,7 +931,6 @@ class AudioInspectorApp(QMainWindow):
                 self.clipping_data.append((file_name, points))
             valid_file &= not clipping
 
-            # Reverb Analizi
             rt60 = self.audio_checker.calculate_reverb(file_path)
             result += f"Reverb Time (RT60): {rt60}<br>"
             if rt60 >= 2:
@@ -889,20 +950,6 @@ class AudioInspectorApp(QMainWindow):
                 invalid_reasons.append("Invalid Bit Depth")
             valid_file &= valid
 
-            # Copy/Paste tespiti
-            """source_file_path, _ = QFileDialog.getOpenFileName(self, "Select Source Audio File for Copy/Paste Detection",
-                                                              "",
-                                                              "Audio Files (*.wav *.mp3)",
-                                                              options=QFileDialog.Options())
-            if not source_file_path:
-                self.result_display.append("Source file selection cancelled.<br>")
-            else:
-                result, message = self.detect_copy_paste(source_file_path, file_path)
-                result += f"{message}<br>"
-                if result:
-                    invalid_reasons.append("Copy/Paste Detected")
-                valid_file &= not result
-
             if not valid_file:
                 all_files_valid = False
                 result += f"<b>Status: <span style='color: red;'>INVALID FILE</span></b><br>"
@@ -912,8 +959,8 @@ class AudioInspectorApp(QMainWindow):
                          invalid_reasons]
                     )
                     result += f"Reasons:<br>{reasons}<br><br>"
-                invalid_results += result + "<br>"""""
-
+                invalid_results += result + "<br>"
+            self.current_analysis_type = "All"
             progress_value = int(((i + 1) / len(selected_files)) * 100)
             self.progress_bar.setValue(progress_value)
 
@@ -927,13 +974,14 @@ class AudioInspectorApp(QMainWindow):
             if invalid_results:
                 self.result_display.setHtml(invalid_results)
             else:
-                self.result_display.setHtml("<b>All files are valid.</b>")
+                self.result_display.setHtml("<b>All selected files are VALID.</b>")
 
             if i < len(selected_files) - 1:
-                invalid_results += "<br>---------------------<br>"
-
-        if all_files_valid:
-            self.result_display.setHtml("<b>All files VALID</b>")
+                invalid_results += "<br><br>"
+        if len(selected_files) == 0:
+            self.result_display.setHtml("<b>No files selected.</b>")
+        elif all_files_valid:
+            self.result_display.setHtml("<b>All selected files are VALID.</b>")
         else:
             self.result_display.setHtml(invalid_results)
 
@@ -965,20 +1013,12 @@ class AudioInspectorApp(QMainWindow):
                 pdf_canvas.drawString(100, y_position, line)
                 y_position -= 20
 
-            # Generate and embed the plot into the PDF
-            plot_filename = 'temp_plot.png'
-            self.plot_statistics(plot_filename)
-            pdf_canvas.drawImage(plot_filename, 50, 450, width=500, height=300)
-
             pdf_canvas.save()
-
-            # Remove the temporary plot file
-            if os.path.exists(plot_filename):
-                os.remove(plot_filename)
 
             self.result_display.append(f"\nPDF successfully saved at: {file_path}")
 
         except Exception as e:
+
             self.result_display.append(f"\nError while saving PDF: {str(e)}")
 
     def download_excel(self):
@@ -1008,12 +1048,12 @@ class AudioInspectorApp(QMainWindow):
                 with pd.ExcelWriter(file_path, engine='xlsxwriter') as writer:
                     df.to_excel(writer, index=False, header=False)
 
-                    # Embed plot into Excel
+                    """"# Embed plot into Excel
                     plot_filename = 'temp_plot.png'
                     self.plot_statistics(plot_filename)
                     workbook = writer.book
                     worksheet = writer.sheets['Sheet1']
-                    worksheet.insert_image('Z10', plot_filename)
+                    worksheet.insert_image('Z10', plot_filename)"""
 
                 self.result_display.append(f"\nExcel successfully saved at: {file_path}")
             else:
@@ -1036,7 +1076,7 @@ class AudioInspectorApp(QMainWindow):
 
     def plot_statistics(self, filename):
         plt.figure(figsize=(15, 10))
-
+        print(self.current_analysis_type)
         if self.current_analysis_type == "All":
             self.create_all_plots()
         elif self.current_analysis_type == "Analyze SNR":
@@ -1055,6 +1095,7 @@ class AudioInspectorApp(QMainWindow):
         plt.close()
 
     def create_all_plots(self):
+
         self.create_bar_plot(self.noise_levels, 'Noise Levels', 'Level (dB)', 'File Number', color='blue', position=1)
         self.create_bar_plot(self.snr_levels, 'SNR Levels', 'Level (dB)', 'File Number', color='orange', position=2)
         self.create_line_plot(self.clipping_data, 'Clipping', 'Clipping Level', 'File Number', color='red', position=3)
@@ -1097,7 +1138,6 @@ class AudioInspectorApp(QMainWindow):
         previous_results = self.result_display.toHtml()
         self.result_display.clear()
         plt.figure(figsize=(15, 10))
-
         if self.current_analysis_type == "All":
             self.create_all_plots()
         elif self.current_analysis_type == "Analyze SNR":
@@ -1141,5 +1181,3 @@ if __name__ == '__main__':
     window = AudioInspectorApp()
     window.show()
     sys.exit(app.exec_())
-
-

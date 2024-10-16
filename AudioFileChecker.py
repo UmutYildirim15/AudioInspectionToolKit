@@ -1,5 +1,5 @@
 import os
-
+import matplotlib.pyplot as plt
 import librosa
 import numpy as np
 from pydub.utils import mediainfo
@@ -93,15 +93,13 @@ class AudioFileChecker:
             codec = info.get('codec_name', '').lower()
             format_name = info.get('format', '').lower()
 
-            # bits_per_sample kontrolü
             bit_depth_value = info.get('bits_per_sample', None)
             if bit_depth_value is not None:
                 bit_depth = int(bit_depth_value)
             else:
-                bit_depth = 16  # Varsayılan değer
+                bit_depth = 16
 
             if 'alac' in codec or 'alac' in format_name:
-                # ALAC dosyaları için bit derinliğini ayarlayın
                 bit_depth = bit_depth if bit_depth else 16
 
             return bit_depth, str(bit_depth) in bit_rates
@@ -117,39 +115,95 @@ class AudioFileChecker:
 
         return np.sqrt(np.mean(y**2))
 
-    import os  # Dosya adını almak için os modülünü dahil ediyoruz.
+    def detect_copy_paste(self, source_files, target_files, min_wave_length=100):
+        results = []
 
-    def detect_copy_paste(self, source_file, target_file):
-        y_source, sr_source = self.load_audio(source_file)
-        y_target, sr_target = self.load_audio(target_file)
+        for source_file in source_files:
+            y_source, sr_source = self.load_audio(source_file)
 
-        if y_source is None or y_target is None:
-            return False, "Audio files could not be loaded."
+            if y_source is None:
+                results.append((source_file, False, "Source audio file could not be loaded."))
+                continue
 
-        source_spectrogram = np.abs(librosa.stft(y_source))
-        target_spectrogram = np.abs(librosa.stft(y_target))
+            for target_file in target_files:
+                y_target, sr_target = self.load_audio(target_file)
 
-        source_half_length = source_spectrogram.shape[1] // 2
-        source_half_spectrogram = source_spectrogram[:, :source_half_length]
+                if y_target is None:
+                    results.append((source_file, False, f"Target audio file {target_file} could not be loaded."))
+                    continue
 
-        target_length = target_spectrogram.shape[1]
+                # Calculate the spectrograms
+                source_spectrogram = np.abs(librosa.stft(y_source))
+                target_spectrogram = np.abs(librosa.stft(y_target))
 
-        pattern_length = min(source_half_length, target_length)
+                # Function to find the start index based on wave length
+                def get_wave_start_index(spectrogram, wave_length_threshold):
+                    energy = np.sum(spectrogram, axis=0)
+                    above_threshold = np.where(energy > wave_length_threshold)[0]
 
-        pattern = source_half_spectrogram[:, :pattern_length]
-        spectrogram_to_search = target_spectrogram
+                    # Return the start index of the first significant wave
+                    return above_threshold[0] if above_threshold.size > 0 else 0
 
-        search_length = spectrogram_to_search.shape[1]
-        match_indices = []
-        for start in range(search_length - pattern_length + 1):
-            segment = spectrogram_to_search[:, start:start + pattern_length]
-            if np.all(np.isclose(segment, pattern, atol=1e-1)):
-                match_indices.append(start)
+                # Get the start index based on the minimum wave length for both source and target
+                source_start_index = get_wave_start_index(source_spectrogram, min_wave_length)
+                target_start_index = get_wave_start_index(target_spectrogram, min_wave_length)
 
-        if match_indices:
-            target_file_name = os.path.basename(target_file)
-            return True, f"Copy/paste detected at file: {target_file_name}"
-        else:
-            return False, "No copy-paste pattern found."
+                # Create the source pattern starting from the determined start index
+                source_pattern = source_spectrogram[:, source_start_index:]
 
+                # Pattern length
+                pattern_length = source_pattern.shape[1]
 
+                # Check for matches in the target spectrogram starting from the target start index
+                match_found = False
+                for start in range(target_start_index, target_spectrogram.shape[1] - pattern_length + 1):
+                    segment = target_spectrogram[:, start:start + pattern_length]
+                    if segment.shape == source_pattern.shape and np.array_equal(segment, source_pattern):
+                        target_file_name = os.path.basename(target_file)
+                        results.append((source_file, True,
+                                        f"Copy/paste detected in target file: {target_file_name}"))
+                        match_found = True
+
+                if not match_found:
+                    results.append((source_file, False, f"No copy/paste detected in target file: {target_file}"))
+
+        return results
+
+    def plot_spectrogram(self, file_path):
+        try:
+            # Load the audio file
+            y, sr = self.load_audio(file_path)
+            if y is None or sr is None:
+                return "Error: Audio file could not be loaded."
+
+            # Compute the spectrogram (STFT)
+            spectrogram = np.abs(librosa.stft(y))
+
+            # Create a figure and axis for the plot
+            plt.figure(figsize=(10, 6))
+
+            # Display the spectrogram
+            librosa.display.specshow(librosa.amplitude_to_db(spectrogram, ref=np.max),
+                                     sr=sr, x_axis='time', y_axis='linear', cmap='magma')
+
+            # Add title and labels
+            plt.title(f"Spectrogram of {os.path.basename(file_path)}")
+            plt.colorbar(format='%+2.0f dB')
+            plt.ylabel('Frequency (Hz)')
+            plt.xlabel('Time (s)')
+
+            # Show the plot
+            plt.tight_layout()
+            plt.show()
+
+            # Return success message
+            return "Spectrogram displayed successfully."
+
+        except FileNotFoundError as fnf_error:
+            return f"Error: {fnf_error}"
+
+        except ValueError as val_error:
+            return f"Error: {val_error}"
+
+        except Exception as e:
+            return f"Error: An unexpected error occurred - {e}"

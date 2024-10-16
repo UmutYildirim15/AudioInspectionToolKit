@@ -12,7 +12,7 @@ import_names = {
     "numpy": "np",
     "pandas": "pd",
     "PyQt5.QtGui": "QPixmap, QIcon",
-    "PyQt5.QtWidgets": "(QApplication, QMainWindow, QPushButton, QFileDialog, QLabel, QVBoxLayout, QWidget, QListWidget, QProgressBar, QTextEdit, QComboBox, QLineEdit, QHBoxLayout)",
+    "PyQt5.QtWidgets": "(QApplication, QMainWindow, QPushButton, QFileDialog, QLabel, QVBoxLayout, QWidget, QListWidget, QProgressBar, QTextEdit, QComboBox, QLineEdit, QHBoxLayout, QListWidgetItem)",
     "PyQt5.QtCore": "Qt",
     "matplotlib.pyplot": "plt",
     "reportlab.lib.pagesizes": "letter",
